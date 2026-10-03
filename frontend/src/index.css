@@ -1,0 +1,147 @@
+:root {
+  --font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --bg-main: #F8FAFC;
+  --card-bg: #FFFFFF;
+  --primary-teal: #0D9488;
+  --primary-teal-dark: #0F766E;
+  --primary-teal-light: #CCFBF1;
+  --accent-blue: #2563EB;
+  --accent-blue-light: #DBEAFE;
+  --text-dark: #0F172A;
+  --text-muted: #64748B;
+  --border-color: #E2E8F0;
+  --card-radius: 16px;
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 20px -2px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 10px 30px -5px rgba(15, 23, 42, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--bg-main);
+  color: var(--text-dark);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #F8FAFC;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #0D9488;
+}
+
+/* Clean White Card Styling */
+.white-card {
+  background: #FFFFFF !important;
+  border: 1px solid #E2E8F0 !important;
+  border-radius: var(--card-radius) !important;
+  box-shadow: var(--shadow-md) !important;
+  transition: all 0.25s ease !important;
+}
+
+.white-card-hover {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s ease !important;
+}
+.white-card-hover:hover {
+  transform: translateY(-4px) !important;
+  border-color: #CBD5E1 !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+
+/* Status Badges - Clean Light Theme */
+.badge-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  text-transform: capitalize;
+  white-space: nowrap !important;
+}
+
+.status-pending { background-color: #FEF3C7; color: #92400E; border: 1px solid #FDE68A; }
+.status-approved { background-color: #CCFBF1; color: #0F766E; border: 1px solid #99F6E4; }
+.status-ordered { background-color: #E0E7FF; color: #3730A3; border: 1px solid #C7D2FE; }
+.status-completed { background-color: #DCFCE7; color: #166534; border: 1px solid #BBF7D0; }
+.status-rejected { background-color: #FEE2E2; color: #991B1B; border: 1px solid #FECACA; }
+.status-not-available { background-color: #F1F5F9; color: #475569; border: 1px solid #E2E8F0; }
+
+/* Custom Table Light Theme */
+.MuiTable-root {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+}
+.MuiTableCell-root {
+  border-bottom: 1px solid #F1F5F9 !important;
+  color: #0F172A !important;
+  padding: 18px 24px !important;
+  vertical-align: middle !important;
+}
+.MuiTableHead-root .MuiTableCell-root {
+  background-color: #F8FAFC !important;
+  color: #475569 !important;
+  font-weight: 800 !important;
+  text-transform: uppercase;
+  font-size: 0.72rem !important;
+  letter-spacing: 0.6px;
+  white-space: nowrap !important;
+  border-bottom: 1px solid #E2E8F0 !important;
+}
+.MuiTableRow-hover:hover .MuiTableCell-root {
+  background-color: #F8FAFC !important;
+}
+
+/* Live Pulse Dot */
+.live-pulse-dot {
+  width: 9px;
+  height: 9px;
+  background-color: #10B981;
+  border-radius: 50%;
+  position: relative;
+  display: inline-block;
+}
+.live-pulse-dot::after {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  right: -3px;
+  bottom: -3px;
+  border-radius: 50%;
+  border: 2px solid #10B981;
+  animation: pulseRing 1.8s infinite ease-out;
+}
+
+@keyframes pulseRing {
+  0% { transform: scale(0.6); opacity: 1; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.35s ease-out forwards;
+}
