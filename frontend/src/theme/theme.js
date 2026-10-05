@@ -22,6 +22,17 @@ const BRANDS = {
     border: '#FED7AA',
     ring: 'rgba(234, 88, 12, 0.14)',
     shadow: 'rgba(234, 88, 12, 0.32)'
+  },
+  purple: {
+    main: '#7C3AED',
+    light: '#A78BFA',
+    dark: '#6D28D9',
+    darker: '#5B21B6',
+    soft: '#F5F3FF',
+    soft2: '#EDE9FE',
+    border: '#DDD6FE',
+    ring: 'rgba(124, 58, 237, 0.14)',
+    shadow: 'rgba(124, 58, 237, 0.3)'
   }
 };
 
@@ -300,5 +311,7 @@ const createAppTheme = (b, secondary = BLUE_SECONDARY, { flat = false } = {}) =>
 const theme = createAppTheme(BRANDS.teal);
 
 export const storeTheme = createAppTheme(BRANDS.orange, BRANDS.orange, { flat: true });
+
+export const executiveTheme = createAppTheme(BRANDS.purple, BRANDS.purple, { flat: true });
 
 export default theme;

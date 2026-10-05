@@ -8,8 +8,11 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, Search, Package, FileText, PlusCircle, Bell, 
   LogOut, Menu as MenuIcon, Store as StoreIcon, CheckCheck, BellOff, ArrowRight,
-  Megaphone, AlertTriangle, XCircle, CheckCircle2, Truck 
+  Megaphone, AlertTriangle, XCircle, CheckCircle2, Truck, MessageSquareWarning, ShieldCheck, KeyRound, Wallet
 } from 'lucide-react';
+import { useActivityTracker } from '../services/activity';
+import { EXPENSES_CHANGED_EVENT } from '../utils/expenses';
+import ChangePasswordDialog from './ChangePasswordDialog';
 import { formatDistanceToNow } from 'date-fns';
 import { AuthContext } from '../context/AuthContext';
 import api from '../services/api';
@@ -18,6 +21,7 @@ import toast from 'react-hot-toast';
 import { storeTheme } from '../theme/theme';
 import { notificationTarget, announceNotificationsRead, applyReadEvent, NOTIFICATIONS_READ_EVENT } from '../utils/notificationLinks';
 import AskAI from './AskAI';
+import NotificationContext from './NotificationContext';
 
 const drawerWidth = 270;
 
@@ -37,6 +41,11 @@ const notifMeta = (notif) => {
   const text = `${notif?.title || ''} ${notif?.message || ''}`.toLowerCase();
   if (notif?.type === 'BROADCAST') return { icon: <Megaphone size={18} />, bg: '#EEF2FF', color: '#4338CA' };
   if (notif?.type === 'LOW_STOCK') return { icon: <AlertTriangle size={18} />, bg: '#FEF3C7', color: '#B45309' };
+  if (notif?.type === 'COMPLAINT_RESPONSE') return { icon: <MessageSquareWarning size={18} />, bg: '#FFE4E6', color: '#BE123C' };
+  if (notif?.type === 'EXPENSE_REMINDER') return { icon: <Wallet size={18} />, bg: '#FEF3C7', color: '#B45309' };
+  if (notif?.type === 'EXPENSE_PAID') return { icon: <Wallet size={18} />, bg: '#DBEAFE', color: '#1D4ED8' };
+  if (notif?.type === 'EXPENSE_CHECKED') return { icon: <Wallet size={18} />, bg: '#DCFCE7', color: '#15803D' };
+  if (notif?.type === 'EXECUTIVE_REVIEW') return { icon: <ShieldCheck size={18} />, bg: '#EDE9FE', color: '#6D28D9' };
   if (text.includes('rejected') || text.includes('not available')) return { icon: <XCircle size={18} />, bg: '#FEE2E2', color: '#DC2626' };
   if (text.includes('completed')) return { icon: <CheckCircle2 size={18} />, bg: '#DCFCE7', color: '#16A34A' };
   if (text.includes('ordered') || text.includes('approved') || text.includes('supplied') || text.includes('available')) return { icon: <Truck size={18} />, bg: '#E0F2FE', color: '#0369A1' };
@@ -48,11 +57,14 @@ const StoreLayout = () => {
   const { logout, user } = useContext(AuthContext);
   const navigate = useNavigate();
   const location = useLocation();
+  useActivityTracker();
 
   const [notifications, setNotifications] = useState([]);
   const [notifAnchorEl, setNotifAnchorEl] = useState(null);
   const [userAnchorEl, setUserAnchorEl] = useState(null);
   const [notifTab, setNotifTab] = useState('ALL');
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [expenseStatus, setExpenseStatus] = useState(null);
 
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
 
@@ -87,20 +99,29 @@ const StoreLayout = () => {
             alignItems: 'center',
             gap: 1.5,
             cursor: 'pointer',
-            maxWidth: 380
+            width: 380,
+            maxWidth: 'calc(100vw - 32px)',
+            boxSizing: 'border-box'
           }}
         >
-          <Bell size={20} color="#EA580C" />
-          <Box>
-            <Typography variant="subtitle2" fontWeight="800">{newNotif.title}</Typography>
-            <Typography variant="caption" sx={{ color: '#64748B' }}>{newNotif.message}</Typography>
+          <Bell size={20} color="#EA580C" style={{ flexShrink: 0 }} />
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Typography variant="subtitle2" fontWeight="800" sx={{ overflowWrap: 'anywhere' }}>{newNotif.title}</Typography>
+            <NotificationContext notif={newNotif} variant="store" showStore={false} showProduct sx={{ mb: 0.5 }} />
+            <Typography variant="caption" sx={{ color: '#64748B', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere' }}>{newNotif.message}</Typography>
           </Box>
         </Box>
       ));
     };
 
     const handleRequestUpdated = (data) => {
-      toast.success(`Request ${data.requestId} is now ${data.status}`);
+      if (data.approvalStage === 'FORWARDED') {
+        toast.success(`Request ${data.requestId} approved by executive and sent to main branch`);
+      } else if (data.approvalStage === 'REJECTED_BY_EXECUTIVE') {
+        toast.error(`Request ${data.requestId} was rejected by the executive`);
+      } else {
+        toast.success(`Request ${data.requestId} is now ${data.status}`);
+      }
       fetchNotifications();
     };
 
@@ -120,6 +141,19 @@ const StoreLayout = () => {
   }, []);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
+
+  useEffect(() => {
+    const loadExpenseStatus = () => api.get('/expenses/status').then((r) => setExpenseStatus(r.data)).catch(() => {});
+    const onNotif = (n) => { if (String(n?.type || '').startsWith('EXPENSE_')) loadExpenseStatus(); };
+    loadExpenseStatus();
+    window.addEventListener(EXPENSES_CHANGED_EVENT, loadExpenseStatus);
+    socket.on('new_notification', onNotif);
+    return () => {
+      window.removeEventListener(EXPENSES_CHANGED_EVENT, loadExpenseStatus);
+      socket.off('new_notification', onNotif);
+    };
+  }, []);
+  const expenseBadge = (expenseStatus?.reminder && expenseStatus.reminder.kind !== 'CURRENT' ? 1 : 0) + (expenseStatus?.toConfirm?.length || 0);
 
   const panelNotifications = (notifTab === 'UNREAD' ? notifications.filter(n => !n.isRead) : notifications).slice(0, 8);
 
@@ -153,12 +187,17 @@ const StoreLayout = () => {
     { text: 'Search Catalog', icon: <Search size={20} />, path: '/store/search' },
     { text: 'Branch Inventory', icon: <Package size={20} />, path: '/store/inventory' },
     { text: 'Requisition History', icon: <FileText size={20} />, path: '/store/requests' },
+    { text: 'Main Branch Updates', icon: <Megaphone size={20} />, path: '/store/updates' },
+    { text: 'Customer Complaints', icon: <MessageSquareWarning size={20} />, path: '/store/complaints' },
+    { text: 'Monthly Expenses', icon: <Wallet size={20} />, path: '/store/expenses', badge: expenseBadge },
     { text: 'Create Requisition', icon: <PlusCircle size={20} />, path: '/store/create-request' },
     { text: 'Notifications', icon: <Bell size={20} />, path: '/store/notifications', badge: unreadCount },
   ];
 
   const activeItem = menuItems.find((item) => item.path === location.pathname);
   const storeCode = user?.store?.storeCode || user?.storeCode;
+  const storeTitle = user?.store?.storeName || user?.name || 'Mini Store';
+  const roleCaption = user?.employee?.designation || 'Mini Store Manager';
   const initial = user?.name?.charAt(0)?.toUpperCase() || 'S';
 
   const drawerContent = (
@@ -170,7 +209,7 @@ const StoreLayout = () => {
         </Box>
         <Box sx={{ overflow: 'hidden', minWidth: 0 }}>
           <Typography fontWeight="800" sx={{ color: '#0F172A', lineHeight: 1.15, fontSize: '1rem' }} noWrap>
-            {user?.name || 'Mini Store'}
+            {storeTitle}
           </Typography>
           <Typography sx={{ color: '#64748B', fontWeight: 700, fontSize: '0.74rem', mt: 0.3 }} noWrap>
             Branch Portal{storeCode ? ` · ${storeCode}` : ''}
@@ -240,7 +279,7 @@ const StoreLayout = () => {
           </Avatar>
           <Box sx={{ overflow: 'hidden', minWidth: 0 }}>
             <Typography variant="subtitle2" fontWeight="800" color="#0F172A" noWrap>{user?.name}</Typography>
-            <Typography variant="caption" color="text.secondary" noWrap>Mini Store Manager</Typography>
+            <Typography variant="caption" color="text.secondary" noWrap>{roleCaption}</Typography>
           </Box>
         </Box>
         <ListItemButton 
@@ -279,7 +318,7 @@ const StoreLayout = () => {
 
             <Box sx={{ minWidth: 0 }}>
               <Typography sx={{ color: '#94A3B8', fontWeight: 800, fontSize: '0.68rem', letterSpacing: '0.6px', textTransform: 'uppercase', lineHeight: 1.2 }} noWrap>
-                {user?.name || 'Mini Store Branch'}
+                {storeTitle}{user?.employee ? ` · ${user.name}` : ''}
               </Typography>
               <Typography fontWeight="800" sx={{ color: '#0F172A', fontSize: { xs: '0.98rem', sm: '1.1rem' }, lineHeight: 1.25 }} noWrap>
                 {activeItem?.text || 'Branch Portal'}
@@ -440,7 +479,8 @@ const StoreLayout = () => {
                               <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: ORANGE, flexShrink: 0, mt: 0.6 }} />
                             )}
                           </Box>
-                          <Typography sx={{ color: '#64748B', fontSize: '0.79rem', mt: 0.3, lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-word' }}>
+                          <NotificationContext notif={notif} variant="store" showStore={false} showProduct sx={{ mt: 0.5 }} />
+                          <Typography sx={{ color: '#64748B', fontSize: '0.79rem', mt: 0.3, lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere' }}>
                             {notif.message}
                           </Typography>
                           <Typography sx={{ color: '#94A3B8', fontSize: '0.7rem', fontWeight: 700, mt: 0.5 }}>
@@ -483,10 +523,14 @@ const StoreLayout = () => {
               <MenuItem disabled sx={{ opacity: '1 !important' }}>
                 <Box>
                   <Typography variant="subtitle2" fontWeight="800">{user?.name}</Typography>
-                  <Typography variant="caption" color="text.secondary">MINI STORE{storeCode ? ` · ${storeCode}` : ''}</Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{roleCaption.toUpperCase()}{storeCode ? ` · ${storeCode}` : ''}</Typography>
+                  {user?.username && <Typography variant="caption" color="text.secondary">Login: {user.username}</Typography>}
                 </Box>
               </MenuItem>
               <Divider />
+              <MenuItem onClick={() => { setUserAnchorEl(null); setPasswordOpen(true); }} sx={{ fontWeight: 700 }}>
+                <KeyRound size={16} style={{ marginRight: 8 }} /> Change password
+              </MenuItem>
               <MenuItem onClick={logout} sx={{ color: 'error.main', fontWeight: 700 }}>
                 <LogOut size={16} style={{ marginRight: 8 }} /> Logout
               </MenuItem>
@@ -528,6 +572,7 @@ const StoreLayout = () => {
         <Box sx={{ height: 72 }} />
       </Box>
       <AskAI />
+      <ChangePasswordDialog open={passwordOpen} onClose={() => setPasswordOpen(false)} />
     </Box>
     </ThemeProvider>
   );

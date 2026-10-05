@@ -50,6 +50,7 @@ const CreateRequest = () => {
   // Store employees list
   const [storeEmployees, setStoreEmployees] = useState([]);
   const [selectedEmployeeName, setSelectedEmployeeName] = useState(user?.name || '');
+  const loggedInEmployee = user?.employee?.employeeName || '';
   
   const [formData, setFormData] = useState({
     composition: '',
@@ -127,7 +128,7 @@ const CreateRequest = () => {
 
     setSubmitting(true);
     try {
-      await api.post('/requests', {
+      const res = await api.post('/requests', {
         productName: finalProdName,
         medicineName: finalProdName,
         composition: formData.composition || (selectedMed?.category ? `Category: ${selectedMed.category}` : ''),
@@ -140,7 +141,9 @@ const CreateRequest = () => {
         },
         comments: formData.comments
       });
-      toast.success('Medicine request submitted successfully');
+      toast.success(res.data?.approvalStage === 'PENDING_EXECUTIVE'
+        ? 'Request submitted. It goes to the main branch after executive approval.'
+        : 'Medicine request submitted successfully');
       navigate('/store/requests');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to submit request');
@@ -182,8 +185,10 @@ const CreateRequest = () => {
             <Typography sx={{ fontWeight: 800, fontSize: '0.88rem', color: '#0F172A' }}>{todayDateStr}</Typography>
           </SessionItem>
 
-          <SessionItem icon={<User size={16} />} label="Employee name">
-            {storeEmployees.length > 0 && storeEmployees.length <= 6 ? (
+          <SessionItem icon={<User size={16} />} label={loggedInEmployee ? 'Raised by (you)' : 'Employee name'}>
+            {loggedInEmployee ? (
+              <Typography sx={{ fontWeight: 800, fontSize: '0.88rem', color: '#0F172A', overflowWrap: 'anywhere' }}>{loggedInEmployee}</Typography>
+            ) : storeEmployees.length > 0 && storeEmployees.length <= 6 ? (
               <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
                 {storeEmployees.map((emp) => {
                   const active = selectedEmployeeName === emp.employeeName;

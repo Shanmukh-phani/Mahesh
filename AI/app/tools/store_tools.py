@@ -210,7 +210,41 @@ def build_store_tools(user: UserContext, thread_key: str, proposed: list):
             success_message=f"{med.get('name')} shelf stock is now {new_qty}.",
         )
 
+    @tool
+    async def add_customer_update(request_id: str, message: str, employee_name: Optional[str] = None) -> str:
+        """Add or update this store's response / customer update on a request after the main branch has replied,
+        e.g. 'Customer has been informed and will visit tomorrow.' employee_name must be an active employee of this store."""
+        text = (message or "").strip()
+        if not text:
+            return "The update message is required."
+        if len(text) > 1000:
+            return "The update must be at most 1000 characters."
+        code = (request_id or "").strip().upper()
+        try:
+            rows = await api.get("/requests", search=code)
+        except BackendError as e:
+            return f"Error: {e}"
+        r = next((x for x in rows if (x.get("requestId") or "").upper() == code), None)
+        if not r:
+            return f"No request {request_id} found for this store."
+        if r.get("status") == "Pending" and not (r.get("mainBranchResponse") or r.get("adminNotes")):
+            return f"{r['requestId']} has no main branch response yet, so a customer update can't be added."
+        body = {"message": text}
+        if employee_name:
+            body["employeeName"] = employee_name.strip()
+        verb = "Update" if r.get("storeResponse") else "Add"
+        return _propose(
+            title=f"{verb} customer update",
+            summary=f'{r["requestId"]} ({r.get("productName") or r.get("medicineName")}): "{text}"'
+            + (f" · by {employee_name.strip()}" if employee_name else ""),
+            method="PUT",
+            path=f"/requests/{r['_id']}/store-response",
+            body=body,
+            success_message=f"Customer update saved on {r['requestId']}. The main branch has been notified.",
+        )
+
     return [
+        add_customer_update,
         get_my_store_summary,
         list_my_requests,
         get_request_details,

@@ -22,7 +22,7 @@ const highlights = [
   {
     icon: <Store size={18} />,
     title: 'Mini-store portals',
-    text: 'Each branch signs in with its store ID or username.'
+    text: 'Every employee signs in with their own login, so each request shows who raised it.'
   }
 ];
 
@@ -191,7 +191,7 @@ const Login = () => {
         >
           <ShieldCheck size={16} />
           <Typography variant="caption" sx={{ color: 'rgba(204,251,241,0.8)', fontWeight: 600 }}>
-            Role-based access for Central Admin and Mini Store staff
+            Role-based access for admins, executive officers and store staff
           </Typography>
         </Box>
       </Box>
@@ -241,7 +241,7 @@ const Login = () => {
               Welcome back
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75, lineHeight: 1.6 }}>
-              Enter your username or store ID to open the admin or branch portal.
+              Enter your username to open the admin, executive or branch portal.
             </Typography>
           </Box>
 
@@ -329,7 +329,7 @@ const Login = () => {
             sx={{
               mt: 2.5,
               display: 'grid',
-              gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+              gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, 1fr)' },
               gap: 1.25
             }}
           >
@@ -343,10 +343,26 @@ const Login = () => {
             >
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.4 }}>
                 <ShieldCheck size={15} color="#0D9488" />
-                <Typography variant="caption" fontWeight={800} color="#0F172A">Central Admin</Typography>
+                <Typography variant="caption" fontWeight={800} color="#0F172A">Admins</Typography>
               </Box>
               <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.45, display: 'block' }}>
                 Warehouse, stores, and request fulfillment
+              </Typography>
+            </Box>
+            <Box
+              sx={{
+                p: 1.5,
+                borderRadius: '14px',
+                border: '1px solid #E2E8F0',
+                bgcolor: '#FFFFFF'
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.4 }}>
+                <ShieldCheck size={15} color="#7C3AED" />
+                <Typography variant="caption" fontWeight={800} color="#0F172A">Executive</Typography>
+              </Box>
+              <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.45, display: 'block' }}>
+                First approval for assigned stores
               </Typography>
             </Box>
             <Box

@@ -82,6 +82,10 @@ def request_line(r: dict) -> str:
     note = r.get("mainBranchResponse") or r.get("adminNotes")
     if note:
         parts.append(f"note: {note}")
+    if r.get("storeResponse"):
+        parts.append(
+            f"store update: {r['storeResponse']} (by {r.get('storeResponseBy') or 'Store Staff'}, {fmt_date(r.get('storeResponseAt'))})"
+        )
     return " | ".join(parts)
 
 

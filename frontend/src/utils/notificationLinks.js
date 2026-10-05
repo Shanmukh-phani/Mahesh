@@ -19,9 +19,42 @@ export const notificationRequestRef = (notif) => {
   return null;
 };
 
+// Request ID / store / product for a notification: stored fields first, then the populated request, then the text.
+export const notificationContext = (notif) => {
+  const req = notif?.requestId && typeof notif.requestId === 'object' ? notif.requestId : null;
+  const text = `${notif?.title || ''} ${notif?.message || ''}`;
+  const storeFromText = text.match(/Store:\s*([A-Z]{2,}\d{2,})/i)?.[1] || text.match(/\bAP\d{2,3}\b/i)?.[0] || '';
+  return {
+    requestCode: EXPENSE_TYPES.includes(notif?.type) ? '' : notif?.requestCode || req?.requestId || text.match(REQUEST_CODE_RE)?.[0]?.toUpperCase() || '',
+    storeCode: (notif?.storeCode || req?.storeCode || req?.storeId?.storeCode || storeFromText).toUpperCase(),
+    storeName: notif?.storeName || req?.storeId?.storeName || '',
+    productName: notif?.productName || req?.productName || req?.medicineName || ''
+  };
+};
+
+const COMPLAINT_TYPES = ['NEW_COMPLAINT', 'COMPLAINT_RESPONSE'];
+// requestCode on these holds the month key, e.g. EXP-2026-10-END
+const EXPENSE_TYPES = ['EXPENSE_REMINDER', 'EXPENSE_CHECKED', 'EXPENSE_PAID', 'EXPENSE_RECEIPT'];
+const expenseMonth = (notif) => String(notif?.requestCode || '').match(/EXP-(\d{4}-\d{2})/)?.[1];
+const complaintTarget = (notif, base) => (notif?.requestCode ? `${base}?code=${encodeURIComponent(notif.requestCode)}` : base);
+
 export const notificationTarget = (notif, role) => {
+  if (EXPENSE_TYPES.includes(notif?.type)) {
+    if (role === 'ADMIN') return '/admin/notifications';
+    const month = expenseMonth(notif);
+    return `${role === 'EXECUTIVE' ? '/executive/expenses' : '/store/expenses'}${month ? `?month=${month}` : ''}`;
+  }
+  if (COMPLAINT_TYPES.includes(notif?.type)) {
+    const base = role === 'ADMIN' ? '/admin/complaints' : role === 'EXECUTIVE' ? '/executive/complaints' : '/store/complaints';
+    return complaintTarget(notif, base);
+  }
   const ref = notificationRequestRef(notif);
   const query = ref ? `?${ref.key}=${encodeURIComponent(ref.value)}` : '';
+
+  if (role === 'EXECUTIVE') {
+    if (ref || notif?.type === 'APPROVAL_REQUIRED') return `/executive/approvals${query}`;
+    return '/executive/notifications';
+  }
 
   if (role === 'ADMIN') {
     if (notif?.type === 'LOW_STOCK') return '/admin/inventory';
@@ -34,8 +67,20 @@ export const notificationTarget = (notif, role) => {
 };
 
 export const notificationActionLabel = (notif, role) => {
+  if (notif?.type === 'EXPENSE_REMINDER') return 'Add expenses';
+  if (notif?.type === 'EXPENSE_CHECKED') return 'View expenses';
+  if (notif?.type === 'EXPENSE_PAID') return 'Confirm payment';
+  if (notif?.type === 'EXPENSE_RECEIPT') return role === 'ADMIN' ? null : 'View expenses';
+  if (notif?.type === 'NEW_COMPLAINT') return 'Review complaint';
+  if (notif?.type === 'COMPLAINT_RESPONSE') return 'View complaint';
+  if (role === 'EXECUTIVE') {
+    if (notif?.type === 'APPROVAL_REQUIRED') return 'Review & approve';
+    if (notificationRequestRef(notif)) return 'View request';
+    return null;
+  }
   if (role === 'ADMIN') {
     if (notif?.type === 'LOW_STOCK') return 'Open inventory';
+    if (notif?.type === 'STORE_RESPONSE') return 'View store update';
     if (notificationRequestRef(notif) || notif?.type === 'NEW_REQUEST') return 'Review & approve';
     return null;
   }

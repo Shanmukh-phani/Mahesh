@@ -11,6 +11,8 @@ const storeSchema = new mongoose.Schema({
   managerEmail: { type: String }, // Manager Email
   status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
   isActive: { type: Boolean, default: true },
+  // Executive officer (User with role EXECUTIVE) who reviews this store's requests first
+  executiveId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
 
 // Sync isActive with status pre-save

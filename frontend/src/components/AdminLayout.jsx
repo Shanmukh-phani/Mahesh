@@ -6,14 +6,18 @@ import {
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, FileText, BarChart3, Package, Store, Users, Bell, 
-  LogOut, Menu as MenuIcon, Activity, AlertTriangle, Info, Volume2
+  LogOut, Menu as MenuIcon, Activity, AlertTriangle, Info, Volume2, MessageCircleReply, MessageSquareWarning,
+  ShieldCheck, KeyRound, History
 } from 'lucide-react';
+import { useActivityTracker } from '../services/activity';
+import ChangePasswordDialog from './ChangePasswordDialog';
 import { AuthContext } from '../context/AuthContext';
 import api from '../services/api';
 import socket, { setSocketRoom } from '../services/socket';
 import toast from 'react-hot-toast';
 import { notificationTarget, announceNotificationsRead, applyReadEvent, NOTIFICATIONS_READ_EVENT } from '../utils/notificationLinks';
 import AskAI from './AskAI';
+import NotificationContext from './NotificationContext';
 
 const drawerWidth = 270;
 
@@ -22,10 +26,13 @@ const AdminLayout = () => {
   const { logout, user } = useContext(AuthContext);
   const navigate = useNavigate();
   const location = useLocation();
+  useActivityTracker();
 
   const [notifications, setNotifications] = useState([]);
   const [notifAnchorEl, setNotifAnchorEl] = useState(null);
   const [userAnchorEl, setUserAnchorEl] = useState(null);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const adminLabel = user?.adminLevel === 'SUB' ? 'Admin' : 'Main Admin';
 
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
 
@@ -58,13 +65,16 @@ const AdminLayout = () => {
             alignItems: 'center',
             gap: 1.5,
             cursor: 'pointer',
-            maxWidth: 380
+            width: 380,
+            maxWidth: 'calc(100vw - 32px)',
+            boxSizing: 'border-box'
           }}
         >
-          <Bell size={20} color="#2DD4BF" />
-          <Box>
-            <Typography variant="subtitle2" fontWeight="800">{newNotif.title}</Typography>
-            <Typography variant="caption" sx={{ color: '#94A3B8' }}>{newNotif.message}</Typography>
+          <Bell size={20} color="#2DD4BF" style={{ flexShrink: 0 }} />
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Typography variant="subtitle2" fontWeight="800" sx={{ overflowWrap: 'anywhere' }}>{newNotif.title}</Typography>
+            <NotificationContext notif={newNotif} variant="dark" showProduct sx={{ mb: 0.5 }} />
+            <Typography variant="caption" sx={{ color: '#94A3B8', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere' }}>{newNotif.message}</Typography>
           </Box>
         </Box>
       ));
@@ -119,10 +129,14 @@ const AdminLayout = () => {
   const menuItems = [
     { text: 'Dashboard', icon: <LayoutDashboard size={20} />, path: '/admin' },
     { text: 'Medicine Requests', icon: <FileText size={20} />, path: '/admin/requests' },
+    { text: 'Store Updates', icon: <MessageCircleReply size={20} />, path: '/admin/store-updates' },
+    { text: 'Complaints', icon: <MessageSquareWarning size={20} />, path: '/admin/complaints' },
     { text: 'Medicine Demand', icon: <BarChart3 size={20} />, path: '/admin/demand' },
     { text: 'Main Inventory', icon: <Package size={20} />, path: '/admin/inventory' },
     { text: 'Mini Stores', icon: <Store size={20} />, path: '/admin/stores' },
     { text: 'Customers', icon: <Users size={20} />, path: '/admin/customers' },
+    { text: 'Team & Access', icon: <ShieldCheck size={20} />, path: '/admin/team' },
+    { text: 'Activity Logs', icon: <History size={20} />, path: '/admin/activity' },
     { text: 'Notifications', icon: <Bell size={20} />, path: '/admin/notifications', badge: unreadCount },
   ];
 
@@ -204,7 +218,7 @@ const AdminLayout = () => {
           </Avatar>
           <Box sx={{ overflow: 'hidden' }}>
             <Typography variant="subtitle2" fontWeight="800" color="#0F172A" noWrap>{user?.name || 'Administrator'}</Typography>
-            <Typography variant="caption" color="text.secondary" noWrap>Central Admin</Typography>
+            <Typography variant="caption" color="text.secondary" noWrap>{adminLabel}</Typography>
           </Box>
         </Box>
         <ListItemButton 
@@ -279,7 +293,7 @@ const AdminLayout = () => {
               transformOrigin={{ vertical: 'top', horizontal: 'right' }}
               slotProps={{
                 paper: {
-                  sx: { width: 380, p: 2, mt: 1 }
+                  sx: { width: 380, maxWidth: 'calc(100vw - 24px)', p: { xs: 1.5, sm: 2 }, mt: 1 }
                 }
               }}
             >
@@ -315,7 +329,11 @@ const AdminLayout = () => {
                       ? { icon: <Volume2 size={16} />, bg: '#E0E7FF', color: '#3730A3' }
                       : notif.type === 'LOW_STOCK'
                         ? { icon: <AlertTriangle size={16} />, bg: '#FEE2E2', color: '#991B1B' }
-                        : { icon: <Info size={16} />, bg: '#CCFBF1', color: '#0F766E' };
+                        : notif.type === 'STORE_RESPONSE'
+                          ? { icon: <MessageCircleReply size={16} />, bg: '#FFEDD5', color: '#C2410C' }
+                          : notif.type === 'NEW_COMPLAINT'
+                            ? { icon: <MessageSquareWarning size={16} />, bg: '#FFE4E6', color: '#BE123C' }
+                            : { icon: <Info size={16} />, bg: '#CCFBF1', color: '#0F766E' };
                     return (
                       <Box
                         key={notif._id}
@@ -335,8 +353,9 @@ const AdminLayout = () => {
                         <Box sx={{ width: 32, height: 32, borderRadius: '10px', bgcolor: tone.bg, color: tone.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                           {tone.icon}
                         </Box>
-                        <Box sx={{ minWidth: 0 }}>
+                        <Box sx={{ minWidth: 0, flex: 1 }}>
                           <Typography sx={{ fontWeight: 800, color: '#0F172A', fontSize: '0.82rem' }} noWrap>{notif.title}</Typography>
+                          <NotificationContext notif={notif} sx={{ mt: 0.4, mb: 0.3 }} />
                           <Typography sx={{ color: '#64748B', fontSize: '0.75rem', mt: 0.25 }} noWrap>{notif.message}</Typography>
                         </Box>
                       </Box>
@@ -375,10 +394,13 @@ const AdminLayout = () => {
               <MenuItem disabled sx={{ opacity: '1 !important', alignItems: 'flex-start' }}>
                 <Box>
                   <Typography sx={{ fontWeight: 800, color: '#0F172A' }}>{user?.name}</Typography>
-                  <Typography sx={{ fontSize: '0.72rem', fontWeight: 800, color: '#0D9488' }}>ADMIN</Typography>
+                  <Typography sx={{ fontSize: '0.72rem', fontWeight: 800, color: '#0D9488' }}>{adminLabel.toUpperCase()}</Typography>
                 </Box>
               </MenuItem>
               <Divider sx={{ my: 0.5 }} />
+              <MenuItem onClick={() => { setUserAnchorEl(null); setPasswordOpen(true); }} sx={{ fontWeight: 700 }}>
+                <KeyRound size={16} style={{ marginRight: 8 }} /> Change password
+              </MenuItem>
               <MenuItem onClick={logout} sx={{ color: '#DC2626', fontWeight: 800 }}>
                 <LogOut size={16} style={{ marginRight: 8 }} /> Logout
               </MenuItem>
@@ -420,6 +442,7 @@ const AdminLayout = () => {
         <Box sx={{ height: 72 }} />
       </Box>
       <AskAI />
+      <ChangePasswordDialog open={passwordOpen} onClose={() => setPasswordOpen(false)} />
     </Box>
   );
 };

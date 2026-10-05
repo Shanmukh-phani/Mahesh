@@ -6,13 +6,28 @@ const Employee = require('../models/Employee');
 const StoreInventory = require('../models/StoreInventory');
 const MedicineRequest = require('../models/MedicineRequest');
 const bcrypt = require('bcrypt');
+const mongoose = require('mongoose');
+const { storeScopeFilter, canAccessStore, actorLabel } = require('../utils/access');
 
 const router = express.Router();
 
-// Get all mini stores with metrics (Admin / Mini Store)
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Validates an executiveId from the request body: undefined = not sent, null = clear, ObjectId = assign
+const readExecutiveId = async (value) => {
+  if (value === undefined) return { value: undefined };
+  if (value === null || value === '') return { value: null };
+  if (!mongoose.isValidObjectId(String(value))) return { error: 'Invalid executive officer' };
+  const exec = await User.findOne({ _id: value, role: 'EXECUTIVE' }, '_id');
+  if (!exec) return { error: 'Executive officer not found' };
+  return { value: exec._id };
+};
+
+// Get mini stores with metrics, limited to the caller's scope (admin: all, executive: assigned, store: own)
 router.get('/', auth, async (req, res) => {
   try {
-    const stores = await Store.find().sort({ createdAt: -1 });
+    const scope = await storeScopeFilter(req.user, '_id');
+    const stores = await Store.find(scope).populate('executiveId', 'name username isActive').sort({ createdAt: -1 });
     
     const storesWithMetrics = await Promise.all(stores.map(async (store) => {
       const inventoryCount = await StoreInventory.countDocuments({ storeId: store._id });
@@ -41,13 +56,20 @@ router.get('/', auth, async (req, res) => {
 // Admin: Get single Mini Store details with Employees and Recent Requests
 router.get('/:id', auth, async (req, res) => {
   try {
-    const store = await Store.findById(req.params.id);
+    if (!(await canAccessStore(req.user, req.params.id))) {
+      return res.status(404).send({ error: 'Store not found' });
+    }
+    const store = await Store.findById(req.params.id).populate('executiveId', 'name username isActive');
     if (!store) {
       return res.status(404).send({ error: 'Store not found' });
     }
 
     const user = await User.findOne({ storeId: store._id }, 'username role isActive');
-    const employees = await Employee.find({ storeId: store._id }).sort({ createdAt: -1 });
+    const logins = await User.find({ storeId: store._id, employeeId: { $exists: true } }, 'username isActive employeeId lastLoginAt').lean();
+    const employees = (await Employee.find({ storeId: store._id }).sort({ createdAt: -1 }).lean()).map((e) => {
+      const login = logins.find((l) => String(l.employeeId) === String(e._id));
+      return { ...e, login: login ? { username: login.username, isActive: login.isActive, lastLoginAt: login.lastLoginAt } : null };
+    });
     const totalEmployees = employees.length;
     const activeEmployeesCount = employees.filter(e => e.isActive !== false).length;
     const recentRequests = await MedicineRequest.find({ storeId: store._id }).sort({ createdAt: -1 }).limit(10);
@@ -87,8 +109,14 @@ router.post('/', auth, authorizeRoles('ADMIN'), async (req, res) => {
       managerEmail, 
       status, 
       username, 
-      password 
+      password,
+      executiveId
     } = req.body;
+
+    const exec = await readExecutiveId(executiveId);
+    if (exec.error) {
+      return res.status(400).send({ error: exec.error });
+    }
 
     const codeToUse = (storeCode || '').trim().toUpperCase();
     const nameToUse = (storeName || '').trim();
@@ -110,7 +138,7 @@ router.post('/', auth, authorizeRoles('ADMIN'), async (req, res) => {
     }
 
     const loginUsername = (username || codeToUse).trim();
-    const existingUser = await User.findOne({ username: new RegExp(`^${loginUsername}$`, 'i') });
+    const existingUser = await User.findOne({ username: new RegExp(`^${escapeRegex(loginUsername)}$`, 'i') });
     if (existingUser) {
       return res.status(400).send({ error: 'Username / Store Login ID already exists' });
     }
@@ -126,26 +154,42 @@ router.post('/', auth, authorizeRoles('ADMIN'), async (req, res) => {
       managerPhone: mgrPhone,
       managerEmail: mgrEmail,
       status: storeStatus,
-      isActive: storeStatus === 'Active'
+      isActive: storeStatus === 'Active',
+      executiveId: exec.value || undefined
     });
     await store.save();
 
-    // Default login password is store123 unless a custom one is sent
+    // The first login belongs to the Store Manager employee; default password is store123 unless a custom one is sent
     const passwordHash = await bcrypt.hash((password && String(password).trim()) || 'store123', 10);
-    const user = new User({
-      username: loginUsername,
-      passwordHash,
-      role: 'MINI_STORE',
-      storeId: store._id,
-      name: nameToUse,
-      phone: mgrPhone,
-      email: mgrEmail,
-      isActive: storeStatus === 'Active'
-    });
+    let manager;
+    let user;
     try {
+      manager = await Employee.create({
+        employeeId: `EMP-${codeToUse}-01`,
+        storeId: store._id,
+        storeCode: codeToUse,
+        employeeName: mgrName,
+        designation: 'Store Manager',
+        phone: mgrPhone,
+        email: mgrEmail,
+        status: storeStatus
+      });
+      user = new User({
+        username: loginUsername,
+        passwordHash,
+        role: 'MINI_STORE',
+        storeId: store._id,
+        employeeId: manager._id,
+        createdBy: req.user._id,
+        name: mgrName,
+        phone: mgrPhone,
+        email: mgrEmail,
+        isActive: storeStatus === 'Active'
+      });
       await user.save();
     } catch (userErr) {
       await Store.findByIdAndDelete(store._id);
+      if (manager) await Employee.findByIdAndDelete(manager._id);
       throw userErr;
     }
 
@@ -176,6 +220,18 @@ router.put('/:id', auth, authorizeRoles('ADMIN'), async (req, res) => {
     } = req.body;
 
     let updateData = { ...req.body };
+    delete updateData.executiveId;
+
+    const exec = await readExecutiveId(req.body.executiveId);
+    if (exec.error) {
+      return res.status(400).send({ error: exec.error });
+    }
+    const previous = await Store.findById(req.params.id, 'executiveId');
+    if (exec.value === null) {
+      updateData.$unset = { executiveId: 1 };
+    } else if (exec.value) {
+      updateData.executiveId = exec.value;
+    }
 
     if (status !== undefined) {
       updateData.status = status;
@@ -194,6 +250,18 @@ router.put('/:id', auth, authorizeRoles('ADMIN'), async (req, res) => {
     if (updateData.isActive !== undefined) {
       await User.updateMany({ storeId: store._id }, { isActive: updateData.isActive });
     }
+
+    // Executive removed from the store: anything waiting on them goes to the main branch
+    if (exec.value === null && previous?.executiveId) {
+      await MedicineRequest.updateMany(
+        { storeId: store._id, approvalStage: 'PENDING_EXECUTIVE' },
+        {
+          $set: { approvalStage: 'FORWARDED', lastUpdatedBy: actorLabel(req.user) },
+          $push: { actionLog: { action: 'AUTO_FORWARDED', note: 'Executive officer unassigned from store', by: actorLabel(req.user), role: 'SYSTEM', createdAt: new Date() } }
+        }
+      );
+    }
+    await store.populate('executiveId', 'name username isActive');
 
     res.send(store);
   } catch (error) {
@@ -221,6 +289,9 @@ router.delete('/:id', auth, authorizeRoles('ADMIN'), async (req, res) => {
 // Admin: Get inventory of a specific store
 router.get('/:id/inventory', auth, async (req, res) => {
   try {
+    if (!(await canAccessStore(req.user, req.params.id))) {
+      return res.status(404).send({ error: 'Store not found' });
+    }
     const inventory = await StoreInventory.find({ storeId: req.params.id }).populate('medicineId');
     res.send(inventory);
   } catch (error) {

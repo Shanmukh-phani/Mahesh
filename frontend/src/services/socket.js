@@ -19,6 +19,7 @@ const socket = io(getSocketURL(), {
 export const roomForUser = (user) => {
   if (!user) return null;
   if (user.role === 'ADMIN') return 'ADMIN_ROOM';
+  if (user.role === 'EXECUTIVE') return user._id ? `EXEC_${user._id}` : null;
   const store = user.store || user.storeId;
   const storeId = typeof store === 'string' ? store : store?._id;
   return storeId ? `STORE_${storeId}` : null;

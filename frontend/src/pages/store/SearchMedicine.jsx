@@ -108,7 +108,7 @@ const SearchMedicine = () => {
       return;
     }
     try {
-      await api.post('/requests', {
+      const res = await api.post('/requests', {
         medicineId: selectedMed._id,
         medicineName: selectedMed.name,
         quantity: Number(requestForm.quantity),
@@ -118,7 +118,9 @@ const SearchMedicine = () => {
           email: requestForm.customerEmail
         }
       });
-      toast.success(`Request submitted for ${selectedMed.name}`);
+      toast.success(res.data?.approvalStage === 'PENDING_EXECUTIVE'
+        ? `Request for ${selectedMed.name} sent for executive approval`
+        : `Request submitted for ${selectedMed.name}`);
       setOpenModal(false);
       navigate('/store/requests');
     } catch (err) {

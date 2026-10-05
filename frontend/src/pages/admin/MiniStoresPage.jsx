@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Box, Typography, Card, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Chip, TextField, Button, CircularProgress,
-  Dialog, DialogTitle, DialogContent, DialogActions, Switch, IconButton
+  Dialog, DialogTitle, DialogContent, DialogActions, Switch, IconButton, MenuItem
 } from '@mui/material';
 import { Store, Plus, Phone, MapPin, RefreshCw, Eye, Trash2, Users } from 'lucide-react';
 import api from '../../services/api';
@@ -20,12 +20,10 @@ const emptyStore = {
   storeAddress: '',
   storePhone: '',
   storeEmail: '',
-  managerName: '',
-  managerPhone: '',
-  managerEmail: '',
   status: 'Active',
   username: '',
-  password: 'store123'
+  password: 'store123',
+  executiveId: ''
 };
 
 const MiniStoresPage = () => {
@@ -41,12 +39,17 @@ const MiniStoresPage = () => {
   const [deleteStore, setDeleteStore] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [triedStore, setTriedStore] = useState(false);
+  const [executives, setExecutives] = useState([]);
 
   const fetchStores = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/stores');
+      const [res, execRes] = await Promise.all([
+        api.get('/stores'),
+        api.get('/users?role=EXECUTIVE').catch(() => ({ data: [] }))
+      ]);
       setStores(res.data || []);
+      setExecutives((execRes.data || []).filter((u) => u.isActive !== false));
     } catch (err) {
       console.error(err);
       toast.error('Failed to load mini stores');
@@ -66,8 +69,6 @@ const MiniStoresPage = () => {
     storeName: requiredText(newStore.storeName, 'Store name'),
     storePhone: phoneError(newStore.storePhone),
     storeEmail: emailError(newStore.storeEmail),
-    managerPhone: phoneError(newStore.managerPhone),
-    managerEmail: emailError(newStore.managerEmail),
     password: passwordError(newStore.password || 'store123')
   };
 
@@ -86,9 +87,9 @@ const MiniStoresPage = () => {
         location: newStore.storeAddress,
         phone: newStore.storePhone,
         email: newStore.storeEmail,
-        contactPerson: newStore.managerName,
         username: newStore.username || newStore.storeCode,
-        password: loginPassword
+        password: loginPassword,
+        executiveId: newStore.executiveId || undefined
       };
       await api.post('/stores', payload);
       const loginId = payload.username || payload.storeCode;
@@ -209,6 +210,9 @@ const MiniStoresPage = () => {
               </Box>
               <Typography sx={{ fontWeight: 800 }}>{st.storeName}</Typography>
               <Typography sx={{ color: '#64748B', fontSize: '0.78rem', mt: 0.4 }}>{st.location || st.storeAddress || 'No address'} · {st.username || st.storeCode}</Typography>
+              <Typography sx={{ color: st.executiveId ? '#6D28D9' : '#B45309', fontSize: '0.75rem', fontWeight: 700, mt: 0.3 }}>
+                Executive: {st.executiveId ? (st.executiveId.name || st.executiveId.username) : 'Not assigned'}
+              </Typography>
               <Box sx={{ display: 'flex', gap: 1, mt: 1.25 }}>
                 <Button size="small" variant="contained" color="primary" startIcon={<Eye size={14} />} onClick={() => { setSelectedStoreId(st._id); setDetailsModalOpen(true); }} sx={{ fontWeight: 800 }}>Details</Button>
                 <IconButton size="small" color="error" onClick={() => setDeleteStore(st)}><Trash2 size={16} /></IconButton>
@@ -225,6 +229,7 @@ const MiniStoresPage = () => {
                 <TableCell>Store</TableCell>
                 <TableCell>Manager</TableCell>
                 <TableCell>Login ID</TableCell>
+                <TableCell>Executive</TableCell>
                 <TableCell align="center">Staff</TableCell>
                 <TableCell align="center">Status</TableCell>
                 <TableCell align="right">Actions</TableCell>
@@ -232,10 +237,10 @@ const MiniStoresPage = () => {
             </TableHead>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={7} align="center" sx={{ py: 6 }}><CircularProgress size={30} /></TableCell></TableRow>
+                <TableRow><TableCell colSpan={8} align="center" sx={{ py: 6 }}><CircularProgress size={30} /></TableCell></TableRow>
               ) : filteredStores.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7}>
+                  <TableCell colSpan={8}>
                     <EmptyState icon={<Store size={22} />} title="No mini stores yet" text='Click "Add mini store" to create the first branch and login.' />
                   </TableCell>
                 </TableRow>
@@ -255,6 +260,9 @@ const MiniStoresPage = () => {
                     </Box>
                   </TableCell>
                   <TableCell sx={{ fontWeight: 700, color: '#0F766E' }}>{st.username || st.storeCode}</TableCell>
+                  <TableCell sx={{ fontSize: '0.82rem', fontWeight: 700, color: st.executiveId ? '#6D28D9' : '#B45309' }}>
+                    {st.executiveId ? (st.executiveId.name || st.executiveId.username) : 'Not assigned'}
+                  </TableCell>
                   <TableCell align="center">
                     <Chip label={`${st.totalEmployees || 0} staff`} size="small" sx={{ bgcolor: '#CCFBF1', color: '#0F766E', fontWeight: 800 }} />
                   </TableCell>
@@ -310,10 +318,21 @@ const MiniStoresPage = () => {
               <TextField fullWidth label="Address" value={newStore.storeAddress} onChange={(e) => setNewStore({ ...newStore, storeAddress: e.target.value })} sx={{ gridColumn: { sm: '1 / -1' } }} />
               <TextField fullWidth label="Store phone" placeholder="9876543210" value={newStore.storePhone} onChange={(e) => setNewStore({ ...newStore, storePhone: limitPhone(e.target.value) })} error={Boolean(storeErrors.storePhone)} helperText={storeErrors.storePhone || '10-digit mobile'} slotProps={{ htmlInput: phoneFieldProps }} />
               <TextField fullWidth label="Store email" placeholder="branch@store.com" value={newStore.storeEmail} onChange={(e) => setNewStore({ ...newStore, storeEmail: e.target.value })} error={Boolean(storeErrors.storeEmail)} helperText={storeErrors.storeEmail} />
-              <TextField fullWidth label="Manager name" value={newStore.managerName} onChange={(e) => setNewStore({ ...newStore, managerName: e.target.value })} />
-              <TextField fullWidth label="Manager phone" placeholder="9876543210" value={newStore.managerPhone} onChange={(e) => setNewStore({ ...newStore, managerPhone: limitPhone(e.target.value) })} error={Boolean(storeErrors.managerPhone)} helperText={storeErrors.managerPhone || '10-digit mobile'} slotProps={{ htmlInput: phoneFieldProps }} />
-              <TextField fullWidth label="Manager email" placeholder="manager@store.com" value={newStore.managerEmail} onChange={(e) => setNewStore({ ...newStore, managerEmail: e.target.value })} error={Boolean(storeErrors.managerEmail)} helperText={storeErrors.managerEmail} />
-              <TextField fullWidth label="Login username" placeholder="AP20" helperText={`Defaults to Store ID ${newStore.storeCode || 'AP20'}`} value={newStore.username} onChange={(e) => setNewStore({ ...newStore, username: e.target.value })} />
+              <TextField
+                select
+                fullWidth
+                label="Executive officer"
+                value={newStore.executiveId}
+                onChange={(e) => setNewStore({ ...newStore, executiveId: e.target.value })}
+                helperText={newStore.executiveId ? 'Requests from this store need their approval first' : 'None: requests go straight to the main branch'}
+                sx={{ gridColumn: { sm: '1 / -1' } }}
+              >
+                <MenuItem value="">No executive</MenuItem>
+                {executives.map((ex) => (
+                  <MenuItem key={ex._id} value={ex._id}>{ex.name || ex.username} · {ex.assignedStores?.length || 0} stores</MenuItem>
+                ))}
+              </TextField>
+              <TextField fullWidth label="Manager login username" placeholder="AP20" helperText={`The store manager's personal login. Defaults to ${newStore.storeCode || 'AP20'}`} value={newStore.username} onChange={(e) => setNewStore({ ...newStore, username: e.target.value })} />
               <TextField
                 fullWidth
                 type="password"

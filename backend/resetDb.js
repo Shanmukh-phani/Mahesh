@@ -11,6 +11,7 @@ const MainInventory = require('./models/MainInventory');
 const StoreInventory = require('./models/StoreInventory');
 const Customer = require('./models/Customer');
 const Notification = require('./models/Notification');
+const Complaint = require('./models/Complaint');
 
 const resetDatabase = async () => {
   try {
@@ -28,6 +29,7 @@ const resetDatabase = async () => {
     await StoreInventory.deleteMany({});
     await Customer.deleteMany({});
     await Notification.deleteMany({});
+    await Complaint.deleteMany({});
 
     console.log('All collection data completely removed.');
 

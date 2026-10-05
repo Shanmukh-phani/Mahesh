@@ -71,7 +71,28 @@ WEB/
 
 ## Domain model
 
-Two roles on `User`: `ADMIN` (no store) and `MINI_STORE` (linked to a `Store`).
+Three roles on `User`: `ADMIN` (no store), `EXECUTIVE` (assigned stores via `Store.executiveId`) and `MINI_STORE` (linked to a `Store` **and** an `Employee`).
+
+### Hierarchy and access
+
+```
+Main admin (adminLevel MAIN) → admins (adminLevel SUB) → executive officers → store employees
+```
+
+- **Admins**: full main-branch powers. Only the main admin creates/edits/deletes SUB admins. Any admin manages executives and assigns stores (`/admin/team`). Every change is recorded with the actor (`actorLabel`, e.g. `Admin A (Admin)`).
+- **Executive officer**: sees only assigned stores (`storeScopeFilter` / `canAccessStore` in `backend/utils/access.js`). Manages employees and their logins in those stores, does the **first approval** on requests, and sees complaints (read-only). Cannot add stores or touch admin pages.
+- **Store employees**: each has a personal `MINI_STORE` login (`User.employeeId`). The logged-in employee is recorded as the request raiser / complaint author / store-update author. The client-sent `employeeName` is ignored when a login is linked to an employee.
+- `auth` middleware reloads the user from the DB every request: deactivated users, deactivated employees and employee logins without an active employee get 401 immediately.
+
+Two-step request approval (`MedicineRequest.approvalStage`):
+
+1. Store employee creates → `PENDING_EXECUTIVE` if the store has an active executive (APPROVAL_REQUIRED notification to `EXEC_<userId>`), else `FORWARDED` straight to the main branch.
+2. Executive `PUT /requests/:id/executive-review { decision: approve|reject, note }` (reason required to reject). Approve → `FORWARDED` + NEW_REQUEST to admins. Reject → `REJECTED_BY_EXECUTIVE` + status `Rejected`. Store gets `EXECUTIVE_REVIEW`.
+3. Admins only see / update forwarded requests (`MAIN_BRANCH_VISIBLE`). `GET /requests?stage=executive` is the read-only "Waiting at executives" view.
+
+Pending requests auto-forward when the executive is unassigned, deactivated or deleted. Requests created before the hierarchy were migrated to `FORWARDED` (`backend/migrations/hierarchy.js`, idempotent, runs at startup).
+
+Audit: `executiveReview`, `raisedBy`, `lastUpdatedBy`, `actionLog[]` (`CREATED`, `AUTO_FORWARDED`, `EXECUTIVE_APPROVED`, `EXECUTIVE_REJECTED`, `STATUS_UPDATE`, `STORE_UPDATE`) and `by` on `mainBranchResponseHistory`. UI: `components/ApprovalTrail.jsx` (`ApprovalChip`, `LastUpdatedBy`, `ActionLogTimeline`).
 
 ### Collections
 
@@ -84,6 +105,8 @@ Two roles on `User`: `ADMIN` (no store) and `MINI_STORE` (linked to a `Store`).
 - **MedicineRequest** — the core workflow document (see statuses below)
 - **Customer** — unique `phone`. Auto-upserted when a store creates a request
 - **Notification** — routed by `recipientRole` and/or `recipientStoreId`
+- **Complaint** — customer complaint raised by a store: `complaintId` (`CMP-10001`), `storeId` + denormalized `storeCode`/`storeName`, `complaintDate`, customer name/phone, `medicineName`, `medicineBrand`, `batchNumber`, `composition`, `purchaseDate`, `quantityBought`, `complaintType` (`Not Working / Ineffective` | `Price Issue` | `Damaged / Expired` | `Side Effect / Reaction` | `Other`), optional `pricePaid`/`expectedPrice`, `complaintText`, `employeeName` (must be an active employee of that store), `status` (`Open` | `In Review` | `Resolved` | `Rejected`), `adminResponse`, `adminResponseAt`, `responseHistory[]`
+- **StoreExpense** — monthly store expense line: `storeId` + `storeCode`/`storeName`, `month` (`YYYY-MM`, from `expenseDate`), `category`, `amount`, `paymentMode`, `paidTo`, `billNumber`, `description`, `addedBy`. Check: `status` `Pending`|`Checked` + `checkedBy/At/Note`. Reimbursement: `paymentStatus` `Unpaid`|`Paid`|`Received`|`Not received` (missing = `Unpaid`), `paidBy/At`, `payoutMode`, `payoutReference`, `payoutNote`, `receiptBy/At/Note`
 
 ### Medicine request statuses
 
@@ -106,15 +129,17 @@ Field aliases (both exist, pre-save keeps them in sync):
 
 ## Auth
 
-`POST /api/auth/login` accepts either a **username** or a **storeCode** (case-insensitive). Inactive users/stores cannot log in.
+`POST /api/auth/login` accepts either a **username** or a **storeCode** (case-insensitive; a store code signs in as that store's Store Manager login). Inactive users/stores/employees cannot log in.
 
-JWT payload (`7d`): `{ _id, role, storeId, storeCode }`.
+JWT payload (`7d`): `{ _id, role, adminLevel, storeId, storeCode, employeeId }`.
 
-Frontend login response user object (this is what `localStorage.user` holds):
+Frontend login response user object (this is what `localStorage.user` holds; `GET /auth/me` refreshes it on app load):
 
 ```js
-{ _id, username, role, store /* populated Store */, name, email }
+{ _id, username, role, adminLevel, store /* populated Store */, employee /* { employeeName, employeeId, designation } */, assignedStores /* EXECUTIVE */, name, email }
 ```
+
+`PUT /auth/change-password { currentPassword, newPassword }` changes only the caller's password (`ChangePasswordDialog` in each layout's user menu). `homeForRole(role)` in `AuthContext` gives `/admin`, `/executive` or `/store`.
 
 Note: the stored user has `store`, **not** `storeId`. JWT on the server has `storeId` as a string. Do not assume they are the same shape.
 
@@ -134,6 +159,10 @@ All routes except `/auth/login` require JWT.
 | `/inventory` | `GET/PUT /main`, `POST /main/add-medicine`, `GET/POST /store` |
 | `/notifications` | List (role-scoped), mark read, admin broadcast |
 | `/customers` | CRUD + `GET /:id/history` (requests matched by phone) |
+| `/users` | Admin only. `GET /?role=ADMIN|EXECUTIVE`, `POST` (ADMIN creation = main admin only, creates SUB), `PUT /:id` (profile, password reset, `isActive`, `storeIds` for executives), `DELETE /:id` |
+| `/complaints` | `GET /` (admin: all, optional `?storeIds=a,b`; executive: assigned stores; store: own only), `GET /employees` (store's active staff incl. manager), `GET /:id`, store `POST /`, `PUT /:id`, `DELETE /:id` (own store only), admin `PUT /:id/response` `{ status, message }` |
+| `/activity` | Any user: `POST /heartbeat {visible, ending, path}`, `POST /track {events:[{type: PAGE_VIEW\|EXPORT, path, title, label, rows}]}`. Admin + executive: `GET /` (feed; filters `role,userId,storeId,category,action,outcome,from,to,q,page,limit`), `GET /sessions` (`status=ONLINE\|ENDED`), `GET /summary` (online now, totals, time per user, categories, `system` uptime for admins), `GET /users`, `PUT /sessions/:id/end` (remote sign-out) |
+| `/expenses` | `GET /meta`. Store: `GET /status` (reminder + `toConfirm[]` months paid by CE awaiting confirmation), `POST /`, `PUT /:id`, `DELETE /:id` (own, Pending only), `PUT /confirm-payment {month, received, note}` (note required when not received). Executive/admin (scoped): `GET /summary?month` (per store incl. `toPay`, `awaitingConfirm`, `received`, `notReceived`), `PUT /check-month`, `PUT /:id/check {checked}` (no un-check once paid), `PUT /pay-month {storeId, month, payoutMode, payoutReference, payoutNote}` (pays Checked + Unpaid/Not received), `POST /remind`. `GET /` for all roles (`month,status,payment,storeId`) |
 
 Important request routes (order matters — analytics are registered **before** `/:id`):
 
@@ -142,6 +171,7 @@ Important request routes (order matters — analytics are registered **before** 
 - `GET /requests/ministore-metrics` — store-scoped totals / pending / today
 - `POST /requests` — `MINI_STORE` only. Creates request + customer upsert + admin notification + socket emit
 - `PUT /requests/:id/status` — `ADMIN` only. Updates status/notes/expectedDate + store notification + socket emit
+- `PUT /requests/:id/store-response` — `MINI_STORE` only, own store's request, only after the main branch responded. Body `{ message, employeeName? }` (employee must be active in that store). Sets `storeResponse` / `storeResponseBy` / `storeResponseAt`, appends to `storeResponseHistory`, writes an ADMIN `STORE_RESPONSE` notification, emits `medicine_request_updated` (full doc) + `new_notification` to `ADMIN_ROOM`
 
 Creating a store (`POST /stores`) also creates:
 
@@ -161,6 +191,7 @@ Rooms:
 |---|---|---|
 | `ADMIN_ROOM` | Admin clients | `socket.emit('join_room', 'ADMIN_ROOM')` |
 | `STORE_<storeMongoId>` | Mini-store clients | `socket.emit('join_room', 'STORE_' + storeId)` |
+| `EXEC_<userMongoId>` | Executive officer clients | `socket.emit('join_room', 'EXEC_' + userId)` — receives `medicine_request_created` / `new_notification` for pending approvals and `medicine_request_updated` for their stores |
 
 Server events (emitted from routes, **not** from socket handlers):
 
@@ -170,7 +201,11 @@ Server events (emitted from routes, **not** from socket handlers):
 | `new_notification` | `ADMIN_ROOM` | Same moment (NEW_REQUEST notification) |
 | `medicine_request_updated` | `STORE_<id>` | Admin changes request status |
 | `new_notification` | `STORE_<id>` | Same moment (STATUS_UPDATE) |
-| `new_notification` | one store room, or **all sockets** | Admin broadcast (`POST /notifications/broadcast`) |
+| `medicine_request_updated` | `ADMIN_ROOM` | Store adds/edits its customer update (full request doc) |
+| `new_notification` | `ADMIN_ROOM` | Same moment (STORE_RESPONSE, "Store Update Received") |
+| `new_notification` | `ADMIN_ROOM` | Store records a customer complaint (`NEW_COMPLAINT`, `requestCode` = complaint ID) |
+| `new_notification` | `STORE_<id>` | Admin responds to a complaint (`COMPLAINT_RESPONSE`) |
+| `new_notification` | each chosen store room, or **all sockets** | Admin broadcast (`POST /notifications/broadcast { title, message, targetStoreIds? }`). Empty `targetStoreIds` = all stores. Otherwise there is one copy per store, sharing `broadcastGroup`; admins see it as one row (`collapseGroups`). The old single `targetStoreId` is still accepted. Stores only see all-store broadcasts or their own copy |
 
 Client singleton: `frontend/src/services/socket.js` (`autoConnect`, websocket + polling, 20 reconnects).
 
@@ -198,11 +233,29 @@ Always remove listeners with the handler reference: `socket.off(event, handler)`
 |---|---|---|
 | `/admin` | Dashboard — KPI cards, demand chart, recent activity | AdminDashboard |
 | `/admin/requests` | Live requisition inbox + status update dialog | MedicineRequests |
+| `/admin/store-updates` | All store customer updates (latest / full history) + Excel download | StoreUpdatesPage |
 | `/admin/demand` | Demand analytics (Recharts) | MedicineDemand |
 | `/admin/inventory` | Warehouse stock add/edit | MainInventoryPage |
 | `/admin/stores` | Mini-store CRUD + employee modal | MiniStoresPage + StoreDetailsModal |
 | `/admin/customers` | Customer list + request history drawer | CustomersPage |
 | `/admin/notifications` | Inbox + broadcast composer | NotificationsPage |
+| `/admin/complaints` | Store complaints: multi-store filter, respond/update status, Excel (one sheet, or one sheet per store) | ComplaintsPage |
+| `/admin/team` | Admins + executive officers, store assignment, enable/disable, password reset | TeamPage |
+| `/admin/activity` | Activity logs: overview (online now, time in app, server uptime), full activity feed with field diffs, sign-in sessions + remote sign-out, Excel | ActivityLogsPage → `components/activity/ActivityLogView` |
+
+### Executive officer (`ExecutiveLayout`, purple brand, `executiveTheme`)
+
+| Path | Page |
+|---|---|
+| `/executive` | Dashboard: waiting approvals, per-store counts |
+| `/executive/approvals` | Approve / reject requests (pending, sent, rejected, all) |
+| `/executive/stores` | Assigned stores → `StoreDetailsModal` for employees + personal logins |
+| `/executive/complaints` | Complaints from assigned stores (read-only) + Excel |
+| `/executive/notifications` | NotificationsPage |
+| `/executive/activity` | Activity logs of their stores' staff + their own (same `ActivityLogView`) |
+| `/executive/expenses` | Store expenses per month: check, remind, mark paid; sees store confirmations live |
+
+Ask AI is not mounted for executives (the AI service only accepts `ADMIN` / `MINI_STORE`).
 
 ### Mini store (`StoreLayout`, blue brand)
 
@@ -212,8 +265,11 @@ Always remove listeners with the handler reference: `socket.off(event, handler)`
 | `/store/search` | Catalog search + quick-request modal |
 | `/store/inventory` | Local shelf stock add/update |
 | `/store/requests` | This store’s requisition history |
+| `/store/updates` | Main branch responses (from `mainBranchResponseHistory`) + add customer update + Excel download |
 | `/store/create-request` | Full requisition form |
 | `/store/notifications` | Same NotificationsPage (store cannot broadcast) |
+| `/store/complaints` | Customer complaint entry (add / edit / delete), main branch responses, Excel download |
+| `/store/expenses` | Monthly expenses add/edit, reminder banner, confirm CE payment received / not received, Excel |
 
 Layouts are responsive: permanent drawer from `sm` up, temporary hamburger drawer on mobile. Main content always has a `Toolbar` spacer so the AppBar does not overlap.
 
@@ -225,7 +281,38 @@ Layouts are responsive: permanent drawer from `sm` up, temporary hamburger drawe
 4. **Admin updates status** on Medicine Requests (status, notes, expected date). Backend writes a store notification and emits `medicine_request_updated` + `new_notification` to `STORE_<id>`.
 5. Store UI toasts and patches the request row / dashboard metrics.
 
-`CreateRequest` **sends** `employeeName`, but `POST /requests` currently sets `employeeName` from `req.user.name` (the store login name), not the selected employee. The selected employee is display-only unless the route is changed.
+`POST /requests` sets `employeeName` from the logged-in employee (`req.user.employeeName`); forms show "Raised by (you)" instead of an employee picker when `user.employee` is present.
+
+## Store expenses
+
+Flow: store adds expenses → CE checks (`EXPENSE_CHECKED` to store) → CE marks the month paid (`EXPENSE_PAID` to store) → store confirms received / not received (`EXPENSE_RECEIPT` to `EXEC_<executiveId>`, or `ADMIN_ROOM` when the store has no executive). "Not received" makes the items payable again (CE sees "Pay again"). All live updates use `new_notification`; pages reload on the matching `type`. Notification `requestCode` = `EXP-YYYY-MM[-END|-START|-MANUAL]` (links open that month).
+
+Reminders (`utils/expenseReminders.js`, started after listen, every 6h): from day 25 if the current month is empty, and days 1–5 if last month is empty — one `EXPENSE_REMINDER` per store per month and phase. Store menu badge = missing-month reminder + payments waiting for confirmation.
+
+## Activity logging
+
+Everything is recorded in two collections:
+
+- **ActivityLog**: one row per event. Fields: `at`; actor (`actorId`, `actorName`, `actorUsername`, `actorRole` ADMIN|EXECUTIVE|MINI_STORE|SYSTEM|GUEST, `adminLevel`, `employeeId`, `designation`); related store (`storeId`, `storeCode`, `storeName`); `category`, `action`, `outcome` (SUCCESS|FAILED), `summary`; `entity`, `entityId`, `entityLabel`; `changes[] {field, from, to}`; `details.input` (sanitized request body, passwords hidden); `source` (WEB|AI_ASSISTANT|SERVER); `method`, `path`, `statusCode`, `durationMs`, `errorMessage`; `sessionId`, `ip`, `userAgent`, `device`.
+- **UserSession**: one per sign-in. Fields: `loginAt`, `lastSeenAt`, `logoutAt`, `endReason` (LOGOUT|FORCED), `endedBy`, `activeMs` (time the app tab was visible, from heartbeats), `pageViews`, `actions`, `lastPath`, `ip`, `device`. Status: ONLINE (seen in the last 3 min), CLOSED, LOGGED_OUT or ENDED_BY_ADMIN.
+
+How events are captured:
+
+- `middleware/activityLogger.js` runs before all routers. It logs every POST/PUT/PATCH/DELETE under `/api` after the response finishes. A `RULES` table maps method + path to category, action, readable summary and model. For `:id` routes it loads the document before and after the call to store a field diff. Failed attempts (status ≥ 400 with a logged-in user) are logged as FAILED. **When you add a mutating route, add a rule there** (unmatched routes still get a generic row).
+- Login, logout, failed and blocked logins: `authRoutes.js` (`LOGIN`, `LOGIN_FAILED`, `LOGIN_BLOCKED`, `LOGOUT`). Login creates a `UserSession` and puts `sid` in the JWT.
+- `auth` middleware calls `resolveSession` (`utils/sessions.js`). It updates `lastSeenAt` (throttled to 30s) and returns 401 if the session was signed out or ended by an admin. Tokens without `sid` (issued before logging existed) get a session keyed by a token hash.
+- Frontend: `services/activity.js` `useActivityTracker()` in all three layouts sends `PAGE_VIEW` on route change and a 60s heartbeat (visibility-aware). `downloadExcel` / `downloadExcelSheets` send `EXPORT`. `AuthContext.logout` calls `POST /auth/logout` (fetch keepalive).
+- Server: `SERVER_START` after listen; `SERVER_STOP` on SIGINT, SIGTERM and nodemon's SIGUSR2, with uptime.
+- `utils/activity.js` `logActivity()` is fire-and-forget and never throws. Use it for any custom event.
+
+Who sees what:
+
+- **Main admin**: everything.
+- **Admin (SUB)**: everything except other admins' rows.
+- **Executive**: their own rows plus store users of their assigned stores.
+- **Store users**: none (403).
+
+Remote sign-out: the main admin can end any session; a SUB admin can end non-admin sessions; an executive can end their store users' sessions.
 
 ## Ask AI assistant (`AI/`)
 

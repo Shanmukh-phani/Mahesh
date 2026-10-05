@@ -8,6 +8,8 @@ import {
   X, Package, AlertTriangle, MessageSquare 
 } from 'lucide-react';
 import { format } from 'date-fns';
+import StoreResponsePanel from './StoreResponsePanel';
+import { ApprovalChip, ActionLogTimeline } from './ApprovalTrail';
 
 const PALETTES = {
   ADMIN: {
@@ -19,17 +21,22 @@ const PALETTES = {
     iconBg: '#FFEDD5', iconColor: '#C2410C', accent: '#EA580C', strong: '#C2410C',
     panelBg: '#FFF7ED', panelBorder: '#FED7AA', panelIcon: '#C2410C', panelTitle: '#7C2D12',
     panelChipBg: '#FFEDD5', panelChipColor: '#9A3412', panelBoxBorder: '#FDBA74', panelDate: '#C2410C'
+  },
+  EXECUTIVE: {
+    iconBg: '#EDE9FE', iconColor: '#6D28D9', accent: '#7C3AED', strong: '#6D28D9',
+    panelBg: '#F5F3FF', panelBorder: '#DDD6FE', panelIcon: '#6D28D9', panelTitle: '#4C1D95',
+    panelChipBg: '#EDE9FE', panelChipColor: '#5B21B6', panelBoxBorder: '#C4B5FD', panelDate: '#6D28D9'
   }
 };
 
 const Row = ({ label, children }) => (
   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2 }}>
     <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>{label}</Typography>
-    <Box sx={{ textAlign: 'right', minWidth: 0, wordBreak: 'break-word' }}>{children}</Box>
+    <Box sx={{ textAlign: 'right', minWidth: 0, overflowWrap: 'anywhere' }}>{children}</Box>
   </Box>
 );
 
-const RequestDetailsModal = ({ open, onClose, request, onUpdateStatus, userRole = 'ADMIN' }) => {
+const RequestDetailsModal = ({ open, onClose, request, onUpdateStatus, onRequestUpdated, userRole = 'ADMIN', extraActions }) => {
   if (!request) return null;
 
   const p = PALETTES[userRole] || PALETTES.ADMIN;
@@ -79,6 +86,7 @@ const RequestDetailsModal = ({ open, onClose, request, onUpdateStatus, userRole 
                   size="small" 
                   className={`badge-chip status-${(request.status || 'pending').toLowerCase().replace(/[^a-z]/g, '')}`} 
                 />
+                <ApprovalChip request={request} />
               </Box>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.3, fontWeight: 600 }}>
                 <Clock size={12} color={p.accent} /> Auto System Date: {formattedDate}
@@ -188,6 +196,41 @@ const RequestDetailsModal = ({ open, onClose, request, onUpdateStatus, userRole 
               </Typography>
             )}
           </Card>
+
+          {/* Section 6: Store Response / Customer Update */}
+          <StoreResponsePanel request={request} role={userRole} onSaved={onRequestUpdated} />
+
+          {(request.executiveReview?.decision || request.approvalStage === 'PENDING_EXECUTIVE') && (
+            <Card sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: '16px', bgcolor: '#F5F3FF', border: '1px solid #DDD6FE', boxShadow: 'none', gridColumn: { md: '1 / -1' } }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+                <Typography variant="subtitle1" fontWeight="800" color="#4C1D95">Executive officer review (step 1)</Typography>
+                <ApprovalChip request={request} short />
+              </Box>
+              {request.executiveReview?.decision ? (
+                <>
+                  <Typography sx={{ fontSize: '0.82rem', color: '#5B21B6', fontWeight: 700 }}>
+                    {request.executiveReview.decision} by {request.executiveReview.by || 'Executive'}
+                    {request.executiveReview.at ? ` · ${format(new Date(request.executiveReview.at), 'dd MMM yyyy, p')}` : ''}
+                  </Typography>
+                  {request.executiveReview.note && (
+                    <Typography sx={{ mt: 1, p: 1.5, bgcolor: '#FFFFFF', borderRadius: '10px', border: '1px solid #C4B5FD', fontSize: '0.85rem', color: '#4C1D95', overflowWrap: 'anywhere' }}>
+                      {request.executiveReview.note}
+                    </Typography>
+                  )}
+                </>
+              ) : (
+                <Typography sx={{ fontSize: '0.84rem', color: '#6D28D9', fontWeight: 600 }}>
+                  Waiting for the store's executive officer to approve. The main branch can act once it is approved.
+                </Typography>
+              )}
+            </Card>
+          )}
+
+          {request.actionLog?.length > 0 && (
+            <Card sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: '16px', bgcolor: '#FFFFFF', border: '1px solid #E2E8F0', boxShadow: 'none', gridColumn: { md: '1 / -1' } }}>
+              <ActionLogTimeline request={request} title="Who did what" />
+            </Card>
+          )}
         </Box>
       </DialogContent>
 
@@ -212,6 +255,7 @@ const RequestDetailsModal = ({ open, onClose, request, onUpdateStatus, userRole 
             Update Response & Status
           </Button>
         )}
+        {extraActions}
       </DialogActions>
     </Dialog>
   );

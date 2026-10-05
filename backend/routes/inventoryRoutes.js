@@ -3,6 +3,7 @@ const { auth, authorizeRoles } = require('../middleware/auth');
 const MainInventory = require('../models/MainInventory');
 const StoreInventory = require('../models/StoreInventory');
 const Medicine = require('../models/Medicine');
+const { canAccessStore } = require('../utils/access');
 
 const router = express.Router();
 
@@ -87,6 +88,9 @@ router.post('/main/add-medicine', auth, authorizeRoles('ADMIN'), async (req, res
 router.get('/store', auth, async (req, res) => {
   try {
     const storeId = req.user.storeId || req.query.storeId;
+    if (req.user.role !== 'MINI_STORE' && !(await canAccessStore(req.user, storeId))) {
+      return res.send([]);
+    }
     const inventory = await StoreInventory.find({ storeId }).populate('medicineId');
     res.send(inventory);
   } catch (error) {

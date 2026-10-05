@@ -12,6 +12,10 @@ import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 
 import RequestDetailsModal from '../../components/RequestDetailsModal';
+import ExpenseReminderBanner from '../../components/expenses/ExpenseReminderBanner';
+import ExpensePaymentConfirm from '../../components/expenses/ExpensePaymentConfirm';
+import { EXPENSES_CHANGED_EVENT } from '../../utils/expenses';
+import { ApprovalChip } from '../../components/ApprovalTrail';
 import { StatCard, EmptyState, statusChipClass } from '../../components/admin/AdminChrome';
 
 const ORANGE = '#EA580C';
@@ -36,6 +40,7 @@ const StoreDashboard = () => {
   const [metrics, setMetrics] = useState(null);
   const [recentRequests, setRecentRequests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [expenseStatus, setExpenseStatus] = useState(null);
 
   // Details Modal
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
@@ -45,6 +50,7 @@ const StoreDashboard = () => {
   const fetchDashboard = async () => {
     setLoading(true);
     try {
+      api.get('/expenses/status').then((r) => setExpenseStatus(r.data)).catch(() => {});
       const res = await api.get('/requests/ministore-metrics');
       setMetrics(res.data);
 
@@ -131,10 +137,20 @@ const StoreDashboard = () => {
         </Box>
       </Card>
 
+      <ExpenseReminderBanner status={expenseStatus} onAdd={(m) => navigate(`/store/expenses?month=${m}&add=1`)} sx={{ mb: { xs: 2.5, md: 3 } }} />
+      <ExpensePaymentConfirm
+        status={expenseStatus}
+        onDone={() => {
+          api.get('/expenses/status').then((r) => setExpenseStatus(r.data)).catch(() => {});
+          window.dispatchEvent(new Event(EXPENSES_CHANGED_EVENT));
+        }}
+        sx={{ mb: { xs: 2.5, md: 3 } }}
+      />
+
       {/* Metrics */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, 1fr)' }, gap: { xs: 1.5, md: 2.5 }, mb: { xs: 2.5, md: 3.5 } }}>
         <StatCard title="Total requisitions" value={metrics?.totalRequests ?? 0} hint="Branch total requests" accent={ORANGE} icon={<FileText size={20} />} />
-        <StatCard title="Pending delivery" value={metrics?.pendingRequests ?? 0} hint="Awaiting warehouse dispatch" accent="#D97706" icon={<Clock size={20} />} />
+        <StatCard title="Pending delivery" value={metrics?.pendingRequests ?? 0} hint={metrics?.awaitingExecutive ? `${metrics.awaitingExecutive} waiting for executive approval` : 'Awaiting warehouse dispatch'} accent="#D97706" icon={<Clock size={20} />} />
         <StatCard title="Today's requests" value={metrics?.todaysRequests ?? 0} hint="Logged today" accent="#059669" icon={<Calendar size={20} />} />
       </Box>
 
@@ -198,6 +214,7 @@ const StoreDashboard = () => {
                     {req.productName || req.medicineName}
                     <Box component="span" sx={{ color: ORANGE_DARK, fontWeight: 800, ml: 1, fontSize: '0.8rem' }}>× {req.quantity}</Box>
                   </Typography>
+                  <ApprovalChip request={req} sx={{ mt: 0.5 }} />
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1, mt: 0.75, flexWrap: 'wrap' }}>
                     <Typography sx={{ color: '#475569', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 0.5 }}>
                       <User size={13} /> {req.customer?.name || 'Walk-in'} {req.customer?.phone ? `· ${req.customer.phone}` : ''}
@@ -247,6 +264,7 @@ const StoreDashboard = () => {
                       </TableCell>
                       <TableCell align="center" sx={{ pr: 3.5 }}>
                         <Chip label={req.status} size="small" className={statusChipClass(req.status)} />
+                        <Box sx={{ mt: 0.5 }}><ApprovalChip request={req} short /></Box>
                       </TableCell>
                     </TableRow>
                   ))}

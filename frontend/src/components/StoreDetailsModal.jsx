@@ -54,7 +54,9 @@ const StoreDetailsModal = ({ open, onClose, storeId, onStoreUpdated }) => {
     phone: '',
     email: '',
     address: '',
-    status: 'Active'
+    status: 'Active',
+    username: '',
+    password: ''
   });
 
   const fetchStoreDetails = async () => {
@@ -62,7 +64,7 @@ const StoreDetailsModal = ({ open, onClose, storeId, onStoreUpdated }) => {
     setLoading(true);
     try {
       const res = await api.get(`/stores/${storeId}`);
-      const list = (res.data.employees || []).filter((e) => e.designation !== 'Store Manager');
+      const list = res.data.employees || [];
       setStoreData(res.data);
       setEmployees(list);
       setSelectedEmpId((prev) => (prev && list.some((e) => e._id === prev) ? prev : (list[0]?._id || '')));
@@ -93,7 +95,9 @@ const StoreDetailsModal = ({ open, onClose, storeId, onStoreUpdated }) => {
       phone: '',
       email: '',
       address: '',
-      status: 'Active'
+      status: 'Active',
+      username: '',
+      password: ''
     });
     setTriedEmp(false);
     setOpenEmpModal(true);
@@ -108,16 +112,31 @@ const StoreDetailsModal = ({ open, onClose, storeId, onStoreUpdated }) => {
       phone: emp.phone || '',
       email: emp.email || '',
       address: emp.address || '',
-      status: emp.status || (emp.isActive ? 'Active' : 'Inactive')
+      status: emp.status || (emp.isActive ? 'Active' : 'Inactive'),
+      username: emp.login?.username || '',
+      password: ''
     });
     setTriedEmp(false);
     setOpenEmpModal(true);
   };
 
+  const hasLogin = Boolean(editingEmp?.login);
+  const loginError = () => {
+    const u = empForm.username.trim();
+    const p = empForm.password;
+    if (!u && !p) return '';
+    if (!u) return 'Login username is required';
+    if (!/^[a-zA-Z0-9._-]{3,60}$/.test(u)) return 'Username: 3+ letters, numbers, dot, dash or underscore';
+    if (!hasLogin && !p) return 'Set a password for the new login';
+    if (p && p.length < 6) return 'Password must be at least 6 characters';
+    return '';
+  };
+
   const empErrors = {
     employeeName: requiredText(empForm.employeeName, 'Employee name'),
     phone: phoneError(empForm.phone),
-    email: emailError(empForm.email)
+    email: emailError(empForm.email),
+    login: loginError()
   };
 
   const handleSaveEmployee = async (e) => {
@@ -252,7 +271,8 @@ const StoreDetailsModal = ({ open, onClose, storeId, onStoreUpdated }) => {
                     </Typography>
                     <InfoItem label="STORE NAME" value={store.storeName} />
                     <InfoItem label="STORE ID" value={store.storeCode} color="#0D9488" />
-                    <InfoItem label="LOGIN USERNAME" value={loginId} color="#2563EB" />
+                    <InfoItem label="MANAGER LOGIN" value={loginId} color="#2563EB" />
+                    <InfoItem label="EXECUTIVE OFFICER" value={store.executiveId ? (store.executiveId.name || store.executiveId.username) : 'Not assigned (requests go straight to main branch)'} color="#7C3AED" />
                     <InfoItem label="ADDRESS" value={store.location} />
                     <InfoItem label="STORE PHONE" value={store.phone} kind="phone" />
                     <InfoItem label="STORE EMAIL" value={store.email} kind="email" />
@@ -305,6 +325,11 @@ const StoreDetailsModal = ({ open, onClose, storeId, onStoreUpdated }) => {
                         <Switch size="small" checked={selectedEmp.status === 'Active'} onChange={() => handleToggleEmpStatus(selectedEmp)} color="primary" />
                       </Box>
                       <InfoItem label="EMPLOYEE ID" value={selectedEmp.employeeId} color="#0D9488" />
+                      <InfoItem
+                        label="LOGIN"
+                        value={selectedEmp.login ? `${selectedEmp.login.username}${selectedEmp.login.isActive === false ? ' (disabled)' : ''}` : 'No login yet. Edit to create one.'}
+                        color={selectedEmp.login ? '#2563EB' : '#94A3B8'}
+                      />
                       <InfoItem label="ROLE" value={selectedEmp.designation} />
                       <InfoItem label="PHONE" value={selectedEmp.phone} kind="phone" />
                       <InfoItem label="EMAIL" value={selectedEmp.email} kind="email" />
@@ -352,7 +377,7 @@ const StoreDetailsModal = ({ open, onClose, storeId, onStoreUpdated }) => {
               <Box>
                 <Typography sx={{ fontWeight: 800, fontSize: '0.72rem', color: '#64748B', mb: 0.8 }}>ROLE</Typography>
                 <ChoiceChips
-                  options={['Employee', 'Executive', 'Other']}
+                  options={['Employee', 'Other'].includes(empForm.designation) ? ['Employee', 'Other'] : [empForm.designation, 'Employee', 'Other']}
                   value={empForm.designation}
                   onChange={(designation) => setEmpForm({ ...empForm, designation })}
                 />
@@ -368,6 +393,28 @@ const StoreDetailsModal = ({ open, onClose, storeId, onStoreUpdated }) => {
               <TextField fullWidth label="Phone" placeholder="9876543210" value={empForm.phone} onChange={(e) => setEmpForm({ ...empForm, phone: limitPhone(e.target.value) })} error={Boolean(empErrors.phone)} helperText={empErrors.phone || '10-digit mobile'} slotProps={{ htmlInput: phoneFieldProps }} />
               <TextField fullWidth label="Email" placeholder="employee@store.com" value={empForm.email} onChange={(e) => setEmpForm({ ...empForm, email: e.target.value })} error={Boolean(empErrors.email)} helperText={empErrors.email} />
               <TextField fullWidth label="Address" placeholder="Area / landmark" value={empForm.address} onChange={(e) => setEmpForm({ ...empForm, address: e.target.value })} />
+              <Box sx={{ p: 1.5, borderRadius: '12px', bgcolor: '#F8FAFC', border: '1px solid #E2E8F0', display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                <Typography sx={{ fontWeight: 800, fontSize: '0.72rem', color: '#64748B' }}>
+                  PERSONAL LOGIN {hasLogin ? '' : '(optional)'}
+                </Typography>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Login username"
+                  placeholder="e.g. ravi.ap20"
+                  value={empForm.username}
+                  onChange={(e) => setEmpForm({ ...empForm, username: e.target.value.replace(/\s/g, '') })}
+                />
+                <TextField
+                  fullWidth
+                  size="small"
+                  label={hasLogin ? 'New password (optional)' : 'Password'}
+                  value={empForm.password}
+                  onChange={(e) => setEmpForm({ ...empForm, password: e.target.value })}
+                  error={triedEmp && Boolean(empErrors.login)}
+                  helperText={(triedEmp && empErrors.login) || (hasLogin ? 'Leave empty to keep the current password' : 'Each employee logs in with their own account')}
+                />
+              </Box>
             </Box>
           </DialogContent>
           <DialogActions sx={{ p: 2 }}>

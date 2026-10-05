@@ -2,6 +2,7 @@ const express = require('express');
 const { auth, authorizeRoles } = require('../middleware/auth');
 const Customer = require('../models/Customer');
 const MedicineRequest = require('../models/MedicineRequest');
+const { storeScopeFilter } = require('../utils/access');
 
 const router = express.Router();
 
@@ -69,7 +70,7 @@ router.get('/:id/history', auth, async (req, res) => {
       return res.status(404).send({ error: 'Customer not found' });
     }
 
-    const requests = await MedicineRequest.find({ 'customer.phone': customer.phone })
+    const requests = await MedicineRequest.find({ 'customer.phone': customer.phone, ...(await storeScopeFilter(req.user)) })
       .populate('storeId', 'storeName storeCode')
       .sort({ createdAt: -1 });
 
